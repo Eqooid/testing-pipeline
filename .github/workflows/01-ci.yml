@@ -1,0 +1,133 @@
+name: CI Pipeline
+run-name:  ${{ github.actor }} is running tests
+
+on: 
+  push: 
+    branches: [master, dev]
+  pull_request: 
+    branches: [master, dev]
+
+env:
+  NODE_VERSION: 24,
+  SECRET_KEY: ${{ secrets.PRIVATE_KEY }}
+  MONGODB_URI: ${{ secrets.DB_URI }}
+  MONGODB_USERNAME: ${{ secrets.DB_USERNAME }}
+  MONGODB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+  MONGODB_DATABASE: ${{ secrets.DB_NAME }}
+jobs:
+
+  # API TESTS JOB
+  api-tests:
+    environment:
+      name: ${{ github.ref_name == 'master' && 'PROD' || 'UAT' }}
+    name: API Tests (Nest JS)
+    runs-on: ubuntu-latest
+    services:
+      mongodb:
+        image: mongo:7.0
+        env:
+          MONGO_INITDB_ROOT_USERNAME: ${{ env.MONGODB_USERNAME }}
+          MONGO_INITDB_ROOT_PASSWORD: ${{ env.MONGODB_PASSWORD }}
+          MONGO_INITDB_DATABASE: ${{ env.MONGODB_DATABASE }}
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.adminCommand(\"ping\")'" 
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      #checkout repository
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      #setup Node.JS
+      - name: 'Setup Node.js ${{ env.NODE_VERSION }}'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: 'api/package.json'
+
+      # Install API Dependencies
+      - name: Install API dependencies
+        working-directory: ./api
+        run: npm ci
+
+      # Wait for services to be ready
+      - name: Wait for services
+        run: |
+          # Wait for MongoDB
+          for i in {1..30}; do
+            if mongosh --eval "db.adminCommand('ping')" --quiet; then
+              echo "MongoDB is ready!"
+              break
+            fi
+            echo "Waiting for MongoDB... ($i/30)"
+            sleep 2
+          done
+          echo "All services are ready!"
+      
+      - name: Run build
+        working-directory: ./api
+        run: npm run build
+
+  # Docker Build Tests
+  docker-build:
+    name: 'Docker Build Test'
+    runs-on: ubuntu-latest
+    needs: [api-tests]
+    steps:
+      #checkout repository
+      - name: 'Checkout repository'
+        uses: actions/checkout@v4
+      
+      #setup docker buildx
+      - name: 'Set up Docker Buildx'
+        uses: docker/setup-buildx-action@v3
+
+      #build api docker image
+      - name: 'Build API docker image'
+        uses: docker/build-push-action@v5
+        with:
+          context: ./api
+          file: ./api/Dockerfile
+          target: production
+          push: false
+          tags: api-test:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # INTEGRATION TESTS    
+  integration-tests:
+    name: 'Integration tests'
+    runs-on: ubuntu-latest
+    needs: [docker-build]
+    steps:
+      #checkout repository
+      - name: 'Checkout repository'
+        uses: actions/checkout@v4
+
+      #create test enviroment file
+      - name: 'Create test environment file'
+        run: |
+          cat > .env << EOF
+          SECRET_KEY=${{ env.SECRET_KEY }}
+          DB_URI=${{ env.MONGODB_URI }}
+          DB_USERNAME=${{ env.MONGODB_USERNAME }}
+          DB_PASSWORD=${{ env.MONGODB_PASSWORD }}
+          DB_NAME=${{ env.MONGODB_DATABASE}} 
+          EOF
+      - name: 'Run integration tests with Docker Compose'
+        run: |
+          docker compose -f docker-compose.yml up -d --build
+          sleep 30  # Wait for services to be ready
+
+           # Health checks
+          curl -f http://localhost:3001 || exit 1
+
+          # Cleanup
+          docker compose -f docker-compose.yml down -v
+
+
+

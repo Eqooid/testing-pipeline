@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: mongo_testing
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${DB_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${DB_PASSWORD}
+      MONGO_INITDB_DATABASE: ${DB_NAME}
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongodb_dev_data:/data/db
+      - ./mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+    networks:
+      - testing-dev-network
+  
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+      target: development
+    container_name: api-testing
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment: 
+      - NODE_ENV=development
+      - PORT=3000
+      - MONGODB_URI=${MONGODB_URI:-${DB_URI}}
+      - SECRET_KEY=${SECRET_KEY}
+    depends_on:
+      - mongodb
+    networks:
+      - testing-dev-network
+    volumes:
+      - ./api:/app
+      - /app/node_modules
+
+volumes:
+  mongodb_dev_data:
+    driver: local
+
+networks:
+  testing-dev-network:
+    driver: bridge
