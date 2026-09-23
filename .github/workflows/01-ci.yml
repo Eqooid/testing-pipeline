@@ -8,7 +8,7 @@ on:
     branches: [master, uat]
 
 env:
-  NODE_VERSION: 24,
+  NODE_VERSION: 24
   SECRET_KEY: ${{ secrets.PRIVATE_KEY }}
   MONGODB_URI: ${{ secrets.DB_URI }}
   MONGODB_USERNAME: ${{ secrets.DB_USERNAME }}
@@ -21,7 +21,7 @@ jobs:
     environment:
       name: ${{ github.ref_name == 'master' && 'PROD' || 'UAT' }}
     name: API Tests (Nest JS)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     services:
       mongodb:
         image: mongo:7.0
@@ -75,7 +75,7 @@ jobs:
   # Docker Build Tests
   docker-build:
     name: 'Docker Build Test'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: [api-tests]
     steps:
       #checkout repository
@@ -101,7 +101,7 @@ jobs:
   # INTEGRATION TESTS    
   integration-tests:
     name: 'Integration tests'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: [docker-build]
     steps:
       #checkout repository
